@@ -1,0 +1,12 @@
+job_id: JOB-2026-0202
+judul: Operator Forklift
+klien: CLI-0042
+jumlah: 2
+pengalaman_minimal: 2
+lokasi: Bantul, DIY
+sla_hari: 10
+dokumen: KTP, Ijazah, SKCK, Surat Keterangan Sehat
+
+skill: Forklift        | 0.50 | intermediate
+skill: SOP Pergudangan | 0.30 | basic
+skill: Komunikasi      | 0.20 | basic

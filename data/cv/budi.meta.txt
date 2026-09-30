@@ -1,0 +1,8 @@
+nama: Budi Wijaya
+lokasi: Bantul, DIY
+pengalaman: 2
+sumber: portal-a
+dokumen: KTP                   | ada | 0.96
+dokumen: Ijazah                | ada | 0.90
+dokumen: SKCK                  | ada | 0.58 | 2025-11-02 | 2026-05-01
+dokumen: Surat Keterangan Sehat| tidak

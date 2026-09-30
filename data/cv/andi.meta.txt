@@ -1,0 +1,8 @@
+nama: Andi Santoso
+lokasi: Sleman, DIY
+pengalaman: 3
+sumber: db-internal
+dokumen: KTP                   | ada | 0.97
+dokumen: Ijazah                | ada | 0.94
+dokumen: SKCK                  | ada | 0.93 | 2026-06-01 | 2026-11-28
+dokumen: Surat Keterangan Sehat| ada | 0.91 | 2026-08-20 | 2026-11-18

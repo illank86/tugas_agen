@@ -1,0 +1,25 @@
+# Inti sistem berjalan dengan PYTHON STANDARD LIBRARY saja (Python 3.9+).
+# Seluruh perintah CLI selain `ui` dan `serve` tidak memerlukan paket apa pun.
+
+# Diperlukan untuk server API (python -m mas_hr.cli serve):
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9      # unggah berkas job requirement dan CV
+
+# Diperlukan untuk antarmuka grafis (python -m mas_hr.cli ui):
+streamlit>=1.50
+plotly>=5.18
+pandas>=2.0
+
+# Opsional — untuk menjalankan uji. httpx2 dibutuhkan TestClient FastAPI.
+pytest>=7.0
+httpx2>=0.1
+
+# Opsional — memperbaiki kualitas ekstraksi teks PDF. Tanpa ini, pembacaan PDF
+# memakai parser bawaan (zlib + ToUnicode CMap) yang sudah menangani PDF hasil
+# pengolah kata, tetapi tidak menangani PDF hasil pindaian.
+# pypdf>=4.0
+
+# Opsional — menukar HashingEmbedder dengan embedding neural. Hanya bila ini
+# dipasang DAN dipakai, laporan boleh menyebut Sentence-BERT.
+# sentence-transformers>=2.2

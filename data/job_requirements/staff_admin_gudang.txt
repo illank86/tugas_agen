@@ -1,0 +1,16 @@
+# Job requirement — satu berkas satu lowongan.
+# Baris diawali '#' adalah komentar.
+# Jumlah seluruh importance HARUS 1.00.
+
+job_id: JOB-2026-0201
+judul: Staff Admin Gudang
+klien: CLI-0031
+jumlah: 3
+pengalaman_minimal: 1
+lokasi: Sleman, DIY
+sla_hari: 14
+dokumen: KTP, Ijazah, SKCK, Surat Keterangan Sehat
+
+skill: Microsoft Excel | 0.40 | intermediate
+skill: SOP Pergudangan | 0.30 | basic
+skill: Komunikasi      | 0.30 | intermediate

@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Basis data dan log lokal
+*.db
+*.sqlite
+*.sqlite3
+*.log
+.env
+
+# Editor
+.vscode/
+.idea/
+
+# CV orang sungguhan tidak boleh masuk repo publik.
+# Hanya contoh sintetis (andi, budi) yang ikut di-commit.
+data/cv/*
+!data/cv/andi.*
+!data/cv/budi.*

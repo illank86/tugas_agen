@@ -1,0 +1,12 @@
+job_id: JOB-2026-0203
+judul: Staff Inventori
+klien: CLI-0031
+jumlah: 1
+pengalaman_minimal: 2
+lokasi: Kota Yogyakarta
+sla_hari: 21
+dokumen: KTP, Ijazah, SKCK
+
+skill: Manajemen Inventori | 0.40 | intermediate
+skill: Microsoft Excel     | 0.30 | intermediate
+skill: SAP MM              | 0.30 | basic
