@@ -4,7 +4,8 @@ Endpoint DeepSeek kompatibel dengan format chat completions OpenAI, sehingga
 cukup satu POST HTTP; tidak perlu paket tambahan dan inti sistem tetap
 berjalan tanpa dependensi.
 
-Konfigurasi lewat variabel lingkungan:
+Konfigurasi lewat variabel lingkungan, atau berkas `.env` di folder proyek
+(salin dari `.env.example`; dimuat otomatis oleh env_loader.py):
     DEEPSEEK_API_KEY   kunci API (wajib untuk memakai LLM)
     DEEPSEEK_MODEL     default "deepseek-chat"
     DEEPSEEK_BASE_URL  default "https://api.deepseek.com"
@@ -17,7 +18,17 @@ import threading
 import urllib.error
 import urllib.request
 
+from .env_loader import load_env
+
+# Dimuat sekali saat modul diimpor; variabel yang sudah disetel tidak ditimpa.
+ENV_FILES = load_env()
+
 DEFAULT_MODEL = "deepseek-chat"
+# Model reasoning (mis. deepseek-v4-pro) menghabiskan token untuk "berpikir"
+# sebelum menjawab, dan token itu ikut dihitung dalam max_tokens. Batas yang
+# terlalu kecil membuat jawaban kosong, jadi batas bawaan dibuat longgar.
+DEFAULT_MAX_TOKENS = 4000
+JSON_MAX_TOKENS = 8000
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 TIMEOUT_SECONDS = 60
 
@@ -41,7 +52,7 @@ def model_name() -> str:
     return os.environ.get("DEEPSEEK_MODEL", DEFAULT_MODEL)
 
 
-def chat(system_prompt: str, user_prompt: str, max_tokens: int = 600,
+def chat(system_prompt: str, user_prompt: str, max_tokens: int = DEFAULT_MAX_TOKENS,
          json_mode: bool = False, temperature: float = 0.3) -> str:
     """Kirim satu percakapan ke DeepSeek dan kembalikan teks balasan.
 
@@ -80,16 +91,23 @@ def chat(system_prompt: str, user_prompt: str, max_tokens: int = 600,
         raise DeepSeekError(f"DeepSeek tidak dapat dihubungi: {error}") from error
 
     try:
-        text = payload["choices"][0]["message"]["content"] or ""
+        choice = payload["choices"][0]
+        text = choice["message"]["content"] or ""
     except (KeyError, IndexError, TypeError) as error:
         raise DeepSeekError(f"format balasan DeepSeek tidak dikenal: {payload}") from error
     if not text.strip():
-        raise DeepSeekError("DeepSeek mengembalikan balasan kosong")
+        if choice.get("finish_reason") == "length":
+            raise DeepSeekError(
+                f"balasan kosong: batas {max_tokens} token habis sebelum model "
+                f"selesai menjawab (model reasoning memakai token untuk berpikir)")
+        raise DeepSeekError(
+            f"DeepSeek mengembalikan balasan kosong "
+            f"(finish_reason={choice.get('finish_reason')})")
     return text.strip()
 
 
 def chat_json(system_prompt: str, user_prompt: str,
-              max_tokens: int = 1500) -> Dict[str, Any]:
+              max_tokens: int = JSON_MAX_TOKENS) -> Dict[str, Any]:
     """Seperti `chat`, tetapi balasan diurai sebagai objek JSON dan di-cache.
 
     Temperature 0 dipakai karena ini ekstraksi, bukan tulisan kreatif.

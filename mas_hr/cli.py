@@ -9,6 +9,7 @@
     python -m mas_hr.cli assign --job data/job_requirements
     python -m mas_hr.cli gamma                    kurva trade-off otonomi
     python -m mas_hr.cli skills                   daftar skill kanonik
+    python -m mas_hr.cli llm-check                cek koneksi LLM DeepSeek
     python -m mas_hr.cli ui                       buka antarmuka Streamlit
     python -m mas_hr.cli serve                    jalankan server FastAPI
     python -m mas_hr.cli start                    jalankan API + UI sekaligus
@@ -280,6 +281,73 @@ def command_gamma(args) -> None:
     print("mengklaim penurunan yang tidak terlihat pada data.")
 
 
+def command_llm_check(args) -> None:
+    """Periksa konfigurasi DeepSeek dan uji tiga fungsi LLM secara langsung.
+
+    Setiap langkah melaporkan OK/GAGAL beserta alasannya, sehingga terlihat
+    apakah masalahnya di kunci, jaringan, nama model, atau format balasan.
+    """
+    import os
+    import time
+    from . import deepseek_client
+    from .deepseek_client import DeepSeekError
+
+    def mask(key: str) -> str:
+        return key[:5] + "..." + key[-4:] if len(key) > 12 else "***"
+
+    print("=== Cek LLM DeepSeek ===")
+    files = [str(path) for path in deepseek_client.ENV_FILES]
+    print(f"Berkas .env     : {', '.join(files) or 'tidak ditemukan'}")
+    key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    if not key:
+        print("API key         : BELUM ADA — isi DEEPSEEK_API_KEY di berkas .env "
+              "(salin dari .env.example).")
+        print("\nHasil: LLM NONAKTIF. Sistem memakai parser aturan dan narasi template.")
+        sys.exit(1)
+    print(f"API key         : {mask(key)}")
+    print(f"Model           : {deepseek_client.model_name()}")
+
+    failures = 0
+
+    def step(label: str, action) -> None:
+        nonlocal failures
+        started = time.perf_counter()
+        try:
+            detail = action()
+            print(f"[OK]    {label} ({time.perf_counter() - started:.1f} dtk): {detail}")
+        except (DeepSeekError, ValueError) as error:
+            failures += 1
+            print(f"[GAGAL] {label}: {error}")
+
+    step("Koneksi & narasi",
+         lambda: deepseek_client.chat("Jawab singkat.",
+                                      "Balas dengan satu kata: siap"))
+
+    def check_cv() -> str:
+        from .llm_parsing import parse_cv_text
+        result = parse_cv_text(
+            "Rina Kartika, Yogyakarta. Pengalaman kerja 3 tahun sebagai admin "
+            "gudang. Mahir Microsoft Excel (pivot, VLOOKUP) dan stock opname.")
+        return (f"nama={result['name']}, pengalaman={result['experience_years']} th, "
+                f"skill={result['skills']}")
+    step("Parsing CV", check_cv)
+
+    def check_job() -> str:
+        from .llm_parsing import parse_job_description
+        job = parse_job_description(
+            "Dicari 2 staff inventori di Sleman, minimal 1 tahun pengalaman, "
+            "menguasai Excel dan manajemen stok.", "JOB-CEK")
+        skills = {s["skill_id"]: s["importance"] for s in job.required_skills}
+        return f"judul={job.title}, jumlah={job.headcount}, skill={skills}"
+    step("Parsing job description", check_job)
+
+    if failures:
+        print(f"\nHasil: {failures} langkah GAGAL. Aplikasi tetap berjalan, tetapi "
+              f"bagian yang gagal memakai parser aturan / narasi template.")
+        sys.exit(1)
+    print("\nHasil: LLM DeepSeek BEKERJA untuk narasi, parsing CV, dan job description.")
+
+
 def command_skills(args) -> None:
     """Cetak taksonomi skill kanonik untuk menyusun berkas job requirement."""
     from .skill_taxonomy import SKILLS
@@ -402,6 +470,9 @@ def build_parser() -> argparse.ArgumentParser:
     gamma = subparsers.add_parser("gamma", help="kurva trade-off otonomi (H6)")
     gamma.add_argument("--scenario", default="S2", choices=list(SCENARIOS))
     gamma.set_defaults(function=command_gamma)
+
+    llm_check = subparsers.add_parser("llm-check", help="cek koneksi LLM DeepSeek")
+    llm_check.set_defaults(function=command_llm_check)
 
     skills = subparsers.add_parser("skills", help="daftar skill kanonik")
     skills.set_defaults(function=command_skills)

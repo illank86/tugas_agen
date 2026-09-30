@@ -585,9 +585,14 @@ def test_narasi_gagal_jatuh_ke_template(monkeypatch):
 # --- parsing LLM (DeepSeek) ------------------------------------------------
 @pytest.fixture(autouse=True)
 def _tanpa_deepseek(monkeypatch):
-    """Uji tidak boleh memanggil DeepSeek sungguhan walau kunci ada di mesin."""
+    """Uji tidak boleh memanggil DeepSeek sungguhan walau kunci ada di mesin.
+
+    Seluruh variabel DeepSeek dibersihkan, termasuk yang dimuat dari .env
+    pengembang, agar hasil uji tidak bergantung pada konfigurasi lokal.
+    """
     from mas_hr import deepseek_client
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    for key in ("DEEPSEEK_API_KEY", "DEEPSEEK_MODEL", "DEEPSEEK_BASE_URL"):
+        monkeypatch.delenv(key, raising=False)
     deepseek_client._json_cache.clear()
 
 
@@ -708,3 +713,31 @@ def test_cv_llm_gagal_tetap_terbaca_dengan_parser_aturan(monkeypatch, tmp_path):
     candidates, report = read_cv_folder(str(tmp_path), job, Settings().today)
     assert len(candidates) == 1 and "dedi.txt" in report["llm_errors"]
     assert next(iter(candidates.values())).llm_skills == {}
+
+
+# --- berkas .env -----------------------------------------------------------
+def test_env_dimuat_tanpa_menimpa_variabel_terminal(monkeypatch, tmp_path):
+    """Isi .env terbaca, tetapi variabel yang disetel di terminal tetap menang."""
+    import os
+    from mas_hr.env_loader import load_env
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "# komentar\n"
+        "export MASHR_TEST_A='nilai a'\n"
+        "MASHR_TEST_B=dari-file  # komentar ujung\n"
+        "MASHR_TEST_C=\"dari-file\"\n", encoding="utf-8")
+    monkeypatch.delenv("MASHR_TEST_A", raising=False)
+    monkeypatch.delenv("MASHR_TEST_B", raising=False)
+    monkeypatch.setenv("MASHR_TEST_C", "dari-terminal")
+    assert load_env([env_file]) == [env_file.resolve()]
+    assert os.environ["MASHR_TEST_A"] == "nilai a"
+    assert os.environ["MASHR_TEST_B"] == "dari-file"
+    assert os.environ["MASHR_TEST_C"] == "dari-terminal"
+    for key in ("MASHR_TEST_A", "MASHR_TEST_B"):
+        monkeypatch.delenv(key)
+
+
+def test_env_tidak_ada_tidak_galat(tmp_path):
+    """Tanpa berkas .env sistem tetap berjalan."""
+    from mas_hr.env_loader import load_env
+    assert load_env([tmp_path / ".env"]) == []

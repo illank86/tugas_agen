@@ -156,6 +156,6 @@ def narrate_run(job, rows: List[dict], outcome: Optional[dict] = None) -> Tuple[
               "kandidat gugur.\n\n"
               f"<data>\n{json.dumps(facts, ensure_ascii=False, indent=2)}\n</data>")
     try:
-        return chat(SYSTEM_PROMPT, prompt, max_tokens=800), "deepseek"
+        return chat(SYSTEM_PROMPT, prompt), "deepseek"
     except DeepSeekError as error:
         return _template_run(job, rows), f"template ({error})"

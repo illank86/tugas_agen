@@ -355,7 +355,7 @@ def render_sidebar() -> Dict[str, Any]:
         "Folder / berkas job requirement", value=DEFAULT_JOB_FOLDER,
         help="Folder atau satu berkas job requirement. Format 'kunci: nilai' "
              "dibaca langsung; job description teks bebas (.txt/.md/.pdf) "
-             "dibaca LLM DeepSeek bila DEEPSEEK_API_KEY disetel.")
+             "dibaca LLM DeepSeek bila DEEPSEEK_API_KEY diisi di berkas .env.")
     job_status = describe_folder(job_folder, list(JOB_SUFFIXES)) if Path(job_folder).is_dir() \
         else {"ok": Path(job_folder).is_file(),
               "message": ("Berkas ditemukan" if Path(job_folder).is_file()
@@ -540,8 +540,9 @@ def render_narrative(cache_key: str, button_label: str, produce) -> None:
     store = st.session_state.setdefault("narratives", {})
     if cache_key not in store:
         if not llm_available():
-            st.caption("Narasi LLM nonaktif: setel DEEPSEEK_API_KEY untuk "
-                       "memakai DeepSeek; tombol di bawah memakai narasi template.")
+            st.caption("Narasi LLM nonaktif: isi DEEPSEEK_API_KEY di berkas .env "
+                       "(salin dari .env.example) lalu jalankan ulang aplikasi; "
+                       "tombol di bawah memakai narasi template.")
         if st.button(button_label, key=f"narrate-{cache_key}",
                      icon=":material/auto_awesome:"):
             with st.spinner("Menyusun narasi..."):

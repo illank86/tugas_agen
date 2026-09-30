@@ -156,7 +156,8 @@ def parse_job_document(text: str, fallback_job_id: str) -> JobRequirement:
     if not llm_available():
         raise ValueError(
             "berkas bukan format 'kunci: nilai'. Untuk membaca job description "
-            "teks bebas dengan LLM, setel variabel lingkungan DEEPSEEK_API_KEY")
+            "teks bebas dengan LLM, isi DEEPSEEK_API_KEY di berkas .env "
+            "(salin dari .env.example) atau setel sebagai variabel lingkungan")
     return parse_job_description(text, fallback_job_id)
 
 

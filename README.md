@@ -269,11 +269,22 @@ sekali — CLI melaporkannya agar tidak disalahartikan sebagai kesalahan sistem.
 ## LLM DeepSeek (opsional)
 
 Tanpa konfigurasi apa pun sistem tetap berjalan seperti biasa, deterministik,
-dan tanpa jaringan. Setel kunci API untuk mengaktifkan tiga fungsi LLM:
+dan tanpa jaringan. Isi kunci API untuk mengaktifkan tiga fungsi LLM.
+
+**Cara yang disarankan — berkas `.env`** (sudah di `.gitignore`, tidak ikut
+ter-commit):
+
+```bash
+cp .env.example .env                  # PowerShell: Copy-Item .env.example .env
+# lalu buka .env dan isi:  DEEPSEEK_API_KEY=sk-...
+```
+
+`.env` dimuat otomatis (`env_loader.py`) dari folder kerja atau akar proyek
+saat aplikasi dijalankan; setelah mengubahnya, jalankan ulang aplikasi.
+Variabel lingkungan yang disetel di terminal selalu menang atas isi `.env`:
 
 ```bash
 export DEEPSEEK_API_KEY=sk-...        # PowerShell: $env:DEEPSEEK_API_KEY="sk-..."
-export DEEPSEEK_MODEL=deepseek-chat   # opsional, ini default-nya
 ```
 
 | Fungsi | Di mana | Batas yang dipaksakan kode |
@@ -281,6 +292,10 @@ export DEEPSEEK_MODEL=deepseek-chat   # opsional, ini default-nya
 | **Parsing job description** teks bebas (.txt/.md/.pdf) | `job_requirement_reader.py` → `llm_parsing.py` | Berkas `kunci: nilai` tetap memakai parser ketat. Skill wajib ada di taksonomi; skill asing menjadi ambiguitas yang tampil di gerbang Konfirmasi lowongan. Bobot dinormalkan dan `validate()` tetap berlaku. |
 | **Parsing CV** (nama, lokasi, pengalaman, skill + level) | `cv_reader.py` → `llm_parsing.py` → Screening Agent | CV disanitasi (`sanitize_cv`) sebelum dikirim. Skill wajib ada di taksonomi. `.meta.txt` selalu menang. Dokumen kepatuhan **tidak pernah** diambil dari LLM. Skor tetap dihitung model screening. |
 | **Narasi** penjelasan hasil kandidat dan ringkasan run | `llm_narrator.py`, tombol di UI, `GET .../narrative` | Hanya fakta terstruktur yang dikirim, tanpa teks CV. Narasi tidak memengaruhi skor maupun keputusan. |
+
+**Cek apakah LLM bekerja:** `python -m mas_hr.cli llm-check` menguji koneksi,
+parsing CV, dan parsing job description secara langsung, lalu mencetak
+`[OK]`/`[GAGAL]` beserta alasannya per langkah.
 
 Bila panggilan gagal, parsing CV jatuh ke parser aturan dan narasi jatuh ke
 template; sumbernya selalu dilaporkan. Kandidat **sintetis** (eksperimen
@@ -314,6 +329,7 @@ Nama berkas mengikuti fungsinya.
 | `job_requirement_reader.py` | pembaca lowongan dari .txt, atau teks bebas via LLM | — |
 | `cv_reader.py` | pembaca CV dari .pdf/.txt + ekstraksi PDF | — |
 | `deepseek_client.py` | klien HTTP DeepSeek (stdlib) + cache | — |
+| `env_loader.py` | pemuat berkas `.env` (stdlib) | — |
 | `llm_parsing.py` | parsing CV dan job description dengan DeepSeek | — |
 | `llm_narrator.py` | narasi hasil kandidat dan run dengan DeepSeek | — |
 | `recruitment_workflow.py` | orkestrasi tujuh fase dan enam gerbang HITL | 5.7 |
