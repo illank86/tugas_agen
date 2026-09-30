@@ -266,6 +266,32 @@ sekali — CLI melaporkannya agar tidak disalahartikan sebagai kesalahan sistem.
 
 ---
 
+## LLM DeepSeek (opsional)
+
+Tanpa konfigurasi apa pun sistem tetap berjalan seperti biasa, deterministik,
+dan tanpa jaringan. Setel kunci API untuk mengaktifkan tiga fungsi LLM:
+
+```bash
+export DEEPSEEK_API_KEY=sk-...        # PowerShell: $env:DEEPSEEK_API_KEY="sk-..."
+export DEEPSEEK_MODEL=deepseek-chat   # opsional, ini default-nya
+```
+
+| Fungsi | Di mana | Batas yang dipaksakan kode |
+|---|---|---|
+| **Parsing job description** teks bebas (.txt/.md/.pdf) | `job_requirement_reader.py` → `llm_parsing.py` | Berkas `kunci: nilai` tetap memakai parser ketat. Skill wajib ada di taksonomi; skill asing menjadi ambiguitas yang tampil di gerbang Konfirmasi lowongan. Bobot dinormalkan dan `validate()` tetap berlaku. |
+| **Parsing CV** (nama, lokasi, pengalaman, skill + level) | `cv_reader.py` → `llm_parsing.py` → Screening Agent | CV disanitasi (`sanitize_cv`) sebelum dikirim. Skill wajib ada di taksonomi. `.meta.txt` selalu menang. Dokumen kepatuhan **tidak pernah** diambil dari LLM. Skor tetap dihitung model screening. |
+| **Narasi** penjelasan hasil kandidat dan ringkasan run | `llm_narrator.py`, tombol di UI, `GET .../narrative` | Hanya fakta terstruktur yang dikirim, tanpa teks CV. Narasi tidak memengaruhi skor maupun keputusan. |
+
+Bila panggilan gagal, parsing CV jatuh ke parser aturan dan narasi jatuh ke
+template; sumbernya selalu dilaporkan. Kandidat **sintetis** (eksperimen
+S1–S7) tidak pernah melewati LLM, sehingga hasil eksperimen tetap dapat
+direproduksi.
+
+**Data pribadi:** parsing CV mengirim isi CV ke layanan DeepSeek. Untuk CV
+orang sungguhan, pastikan ada persetujuan pemiliknya.
+
+---
+
 ## Peta kode ke bagian laporan
 
 Nama berkas mengikuti fungsinya.
@@ -285,8 +311,11 @@ Nama berkas mengikuti fungsinya.
 | `assignment_optimizer.py` | Hungarian/Jonker-Volgenant dan pembanding greedy | 6.5.3 |
 | `database.py` | skema SQLite 18 tabel, trigger append-only | 7.2 |
 | `synthetic_data.py` | generator kandidat dan lowongan + ground truth | 7.4 |
-| `job_requirement_reader.py` | pembaca lowongan dari .txt | — |
+| `job_requirement_reader.py` | pembaca lowongan dari .txt, atau teks bebas via LLM | — |
 | `cv_reader.py` | pembaca CV dari .pdf/.txt + ekstraksi PDF | — |
+| `deepseek_client.py` | klien HTTP DeepSeek (stdlib) + cache | — |
+| `llm_parsing.py` | parsing CV dan job description dengan DeepSeek | — |
+| `llm_narrator.py` | narasi hasil kandidat dan run dengan DeepSeek | — |
 | `recruitment_workflow.py` | orkestrasi tujuh fase dan enam gerbang HITL | 5.7 |
 | `comparison_baselines.py` | arm B0 dan B1 | 9.1 |
 | `evaluation_metrics.py` | metrik, micro-average, Mann-Whitney U | 9.2 |
@@ -316,8 +345,10 @@ requirement .txt dan CV .pdf.
 
 **Tidak ada — jangan diklaim:**
 
-- **LLM sungguhan.** Intake dan Placement memakai logika deterministik dan
-  template. Hook-nya tersedia; sampai ditukar, jangan tulis "memakai LLM".
+- **LLM dalam pengambilan keputusan.** DeepSeek (opsional) hanya dipakai
+  untuk parsing CV/job description dan narasi. Intake, Placement, skor, dan
+  keputusan kepatuhan tetap deterministik, dan eksperimen S1–S7 tidak
+  memakai LLM. Jangan klaim "agen berbasis LLM".
 - **Embedding neural.** Default `HashingEmbedder` berbasis karakter n-gram.
 - **OCR sungguhan.** Disimulasikan dari metadata dokumen.
 - **ASR / transkripsi wawancara.** Hanya referensi placeholder.

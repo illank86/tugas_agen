@@ -45,6 +45,10 @@ class JobRequirement:
         required_skills: daftar dict {skill_id, importance, min_level}.
             `importance` adalah beta_j pada rumus coverage-aware matching dan
             harus berjumlah 1.0.
+        parsed_by: "format" untuk berkas `kunci: nilai`, "deepseek" bila
+            diekstrak LLM dari job description teks bebas.
+        unresolved_skills: skill dari teks bebas yang tidak dapat dipetakan
+            ke taksonomi; diteruskan IntakeAgent sebagai ambiguitas.
     """
 
     job_id: str
@@ -57,6 +61,8 @@ class JobRequirement:
     sla_days: int = 14
     required_documents: List[str] = field(default_factory=lambda: [
         "KTP", "Ijazah", "SKCK", "Surat Keterangan Sehat"])
+    parsed_by: str = "format"
+    unresolved_skills: List[str] = field(default_factory=list)
 
     def validate(self) -> None:
         """Pastikan bobot skill berjumlah 1.0.
@@ -89,6 +95,9 @@ class Candidate:
         interview_quality: nilai yang dipakai simulator wawancara. Untuk CV
             dari berkas nilainya placeholder dan hasil wawancara tidak
             bermakna — pakai mode interaktif agar manusia yang menilai.
+        llm_skills: skill kanonik hasil ekstraksi LLM (DeepSeek), sudah
+            divalidasi ke taksonomi. Kosong berarti Screening Agent hanya
+            memakai parser aturan.
     """
 
     candidate_id: str
@@ -105,6 +114,7 @@ class Candidate:
     document_problem_truth: bool = False
     interview_quality: float = 0.7
     dedup_hash: str = ""
+    llm_skills: Dict[str, str] = field(default_factory=dict)
 
 
 def is_truly_eligible(candidate: Candidate, job: JobRequirement) -> bool:

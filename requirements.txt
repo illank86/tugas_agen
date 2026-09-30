@@ -1,5 +1,8 @@
 # Inti sistem berjalan dengan PYTHON STANDARD LIBRARY saja (Python 3.9+).
 # Seluruh perintah CLI selain `ui` dan `serve` tidak memerlukan paket apa pun.
+#
+# LLM DeepSeek (parsing CV/job description dan narasi) juga tanpa paket
+# tambahan: cukup setel variabel lingkungan DEEPSEEK_API_KEY. Lihat README.
 
 # Diperlukan untuk server API (python -m mas_hr.cli serve):
 fastapi>=0.110

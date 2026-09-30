@@ -92,6 +92,21 @@ def parse_cv(cv_text: str) -> Tuple[Dict[str, str], float]:
     return skills, experience
 
 
+def merge_skills(rule_skills: Dict[str, str],
+                 llm_skills: Dict[str, str]) -> Dict[str, str]:
+    """Gabungkan skill parser aturan dengan skill hasil DeepSeek.
+
+    Skill LLM sudah divalidasi ke taksonomi saat CV dibaca (llm_parsing.py).
+    Untuk skill yang ditemukan keduanya, level tertinggi dipakai.
+    """
+    merged = dict(rule_skills)
+    for skill_id, level in llm_skills.items():
+        previous = merged.get(skill_id)
+        if previous is None or LEVEL_ORDER[level] > LEVEL_ORDER[previous]:
+            merged[skill_id] = level
+    return merged
+
+
 class ScreeningAgent(Agent):
     """Memberi skor kelayakan awal untuk setiap kandidat dalam satu batch."""
 
@@ -120,12 +135,14 @@ class ScreeningAgent(Agent):
 
         self.request_permission("parse_cv", confidence=1.0)
         skills, parsed_experience = parse_cv(cleaned_text)
+        skills = merge_skills(skills, candidate.llm_skills)
         experience = parsed_experience or candidate.experience_years
         features = build_features(skills, experience, job, cleaned_text)
         score, confidence = self.scorer.predict(features)
 
         if findings:
             raw_skills, raw_experience = parse_cv(candidate.cv_text)
+            raw_skills = merge_skills(raw_skills, candidate.llm_skills)
             raw_features = build_features(raw_skills, raw_experience or experience,
                                           job, candidate.cv_text)
             raw_score, _ = self.scorer.predict(raw_features)

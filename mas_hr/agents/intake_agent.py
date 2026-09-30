@@ -1,9 +1,10 @@
 """Intake Agent — AI, static, deliberatif. Fase 1: Request & Intake.
 
 Menerima permintaan klien yang ambigu, mengklarifikasi, lalu menormalkan
-skill ke taksonomi kanonik. Tanpa LLM, klarifikasi disimulasikan sebagai
-pengisian field yang belum lengkap; antarmukanya tidak berubah bila kelak
-LLM sungguhan dipasang.
+skill ke taksonomi kanonik. Klarifikasi disimulasikan sebagai pengisian
+field yang belum lengkap. Bila lowongan diekstrak DeepSeek dari teks bebas
+(llm_parsing.py), skill yang tidak dapat dipetakan ke taksonomi ikut dicatat
+sebagai ambiguitas agar dilihat manusia di gerbang konfirmasi lowongan.
 """
 from typing import Optional
 
@@ -45,6 +46,10 @@ class IntakeAgent(Agent):
                                "importance": requirement["importance"],
                                "min_level": requirement["min_level"]})
 
+        for raw_skill in job.unresolved_skills:
+            unresolved.append(raw_skill)
+            clarification_turns += 1
+
         # Field kosong memicu satu putaran tanya-jawab tambahan ke klien.
         if not job.min_experience_years:
             clarification_turns += 1
@@ -59,6 +64,7 @@ class IntakeAgent(Agent):
             "required_documents": job.required_documents,
             "clarification_turns": clarification_turns,
             "unresolved_ambiguities": unresolved,
+            "parsed_by": job.parsed_by,
         }
         self.record("job", job.job_id, "INTAKE_STRUCTURED",
                     {"skills": len(normalized), "turns": clarification_turns,

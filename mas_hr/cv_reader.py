@@ -6,6 +6,11 @@ Ekstraksi teks PDF dicoba berurutan dari yang paling andal:
   3. bawaan       — parser minimal berbasis zlib + operator teks PDF
 
 Jalur ketiga ada supaya repositori tetap berjalan tanpa dependensi apa pun.
+
+Bila DEEPSEEK_API_KEY disetel, teks CV juga diekstrak LLM DeepSeek (nama,
+lokasi, pengalaman, skill kanonik; lihat llm_parsing.py). Metadata .meta.txt
+yang ditulis manusia selalu menang atas hasil LLM, dan dokumen kepatuhan
+tidak pernah diambil dari LLM.
 Keterbatasannya nyata: PDF hasil pindaian (gambar) tidak menghasilkan teks
 sama sekali, dan font Type0/CID dengan encoding khusus bisa keluar sebagai
 karakter salah. Bila hasilnya kacau, pasang pypdf.
@@ -15,6 +20,7 @@ karena domain ini memuat KTP, ijazah, dan SKCK. Bila memasukkan CV orang
 sungguhan, pastikan ada persetujuan dan jangan commit foldernya ke repositori
 publik. Untuk presentasi kelas, CV buatan sendiri sudah cukup.
 """
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -23,6 +29,7 @@ import shutil
 import subprocess
 import zlib
 
+from .deepseek_client import DeepSeekError, is_available as llm_available
 from .domain_models import Candidate, Document, JobRequirement
 
 SUPPORTED_SUFFIXES = {".pdf", ".txt", ".md"}
@@ -314,8 +321,37 @@ def _build_documents(candidate_id: str, meta: dict, required: List[str],
     return documents
 
 
+def _parse_with_llm(texts: Dict[str, str]) -> Tuple[Dict[str, dict], Dict[str, str]]:
+    """Ekstrak CV dengan DeepSeek secara paralel.
+
+    Returns:
+        Pasangan (hasil per nama berkas, galat per nama berkas). CV yang gagal
+        tetap diproses dengan parser aturan; kegagalan LLM tidak menggagalkan
+        pembacaan folder.
+    """
+    from .llm_parsing import parse_cv_text
+
+    def work(item: Tuple[str, str]) -> Tuple[str, Optional[dict], str]:
+        name, text = item
+        try:
+            return name, parse_cv_text(text), ""
+        except DeepSeekError as error:
+            return name, None, str(error)
+
+    parsed: Dict[str, dict] = {}
+    errors: Dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        for name, result, error in executor.map(work, texts.items()):
+            if result is None:
+                errors[name] = error
+            else:
+                parsed[name] = result
+    return parsed, errors
+
+
 def read_cv_folder(folder_path: str, job: JobRequirement, today: date,
-                   assume_documents_valid: bool = False) -> Tuple[Dict[str, Candidate], dict]:
+                   assume_documents_valid: bool = False,
+                   use_llm: Optional[bool] = None) -> Tuple[Dict[str, Candidate], dict]:
     """Muat seluruh CV dalam sebuah folder menjadi kandidat.
 
     Struktur folder yang diharapkan:
@@ -332,6 +368,8 @@ def read_cv_folder(folder_path: str, job: JobRequirement, today: date,
         assume_documents_valid: bila True, dokumen tanpa metadata dianggap
             sah. Ini MENGARANG bukti kepatuhan dan hanya boleh dipakai untuk
             demo cepat.
+        use_llm: ekstrak CV dengan DeepSeek. None berarti otomatis: aktif
+            bila DEEPSEEK_API_KEY disetel.
 
     Returns:
         Pasangan (kandidat per id, ringkasan pembacaan). Ringkasan memuat
@@ -373,18 +411,36 @@ def read_cv_folder(folder_path: str, job: JobRequirement, today: date,
     methods: Dict[str, str] = {}
     empty: List[str] = []
 
-    for index, file_path in enumerate(files):
+    texts: Dict[str, str] = {}
+    for file_path in files:
         text, method = read_cv_text(file_path)
         methods[file_path.name] = method
+        texts[file_path.name] = text
         if not text.strip():
             empty.append(file_path.name)
+
+    if use_llm is None:
+        use_llm = llm_available()
+    llm_parsed: Dict[str, dict] = {}
+    llm_errors: Dict[str, str] = {}
+    if use_llm:
+        llm_parsed, llm_errors = _parse_with_llm(
+            {name: text for name, text in texts.items() if text.strip()})
+
+    for index, file_path in enumerate(files):
+        text = texts[file_path.name]
         meta = _parse_metadata(folder / f"{file_path.stem}.meta.txt")
+        llm = llm_parsed.get(file_path.name, {})
         candidate_id = f"CND-FILE-{index:03d}"
+        # Urutan prioritas: metadata manusia > hasil LLM > nilai bawaan.
+        experience = meta.get("experience_years")
+        if experience is None:
+            experience = llm.get("experience_years")
         candidates[candidate_id] = Candidate(
             candidate_id=candidate_id,
-            name=meta.get("name", file_path.stem),
-            location=meta.get("location", job.location),
-            experience_years=meta.get("experience_years", 0.0),
+            name=meta.get("name") or llm.get("name") or file_path.stem,
+            location=meta.get("location") or llm.get("location") or job.location,
+            experience_years=experience if experience is not None else 0.0,
             cv_text=text,
             documents=_build_documents(candidate_id, meta, job.required_documents,
                                        today, assume_documents_valid),
@@ -393,6 +449,8 @@ def read_cv_folder(folder_path: str, job: JobRequirement, today: date,
             persona="from_file",
             job_id_hint=job.job_id,
             document_problem_truth=False,   # tidak diketahui; jangan dipakai metrik
-            interview_quality=0.70)         # placeholder; pakai mode interaktif
+            interview_quality=0.70,         # placeholder; pakai mode interaktif
+            llm_skills=llm.get("skills", {}))
     return candidates, {"extraction_methods": methods, "empty_files": empty,
-                        "total": len(files), "skipped_duplicates": skipped}
+                        "total": len(files), "skipped_duplicates": skipped,
+                        "llm_parsed": sorted(llm_parsed), "llm_errors": llm_errors}

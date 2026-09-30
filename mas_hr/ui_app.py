@@ -31,7 +31,9 @@ if _PROJECT_ROOT not in sys.path:
 from mas_hr.cv_reader import read_cv_folder
 from mas_hr.human_approval import CHECKPOINT_ROLES, SimulatedApprover
 from mas_hr.recruitment_service import RecruitmentService
-from mas_hr.job_requirement_reader import load_jobs, read_job_file
+from mas_hr.job_requirement_reader import JOB_SUFFIXES, load_jobs, read_job_file
+from mas_hr.llm_narrator import is_available as llm_available
+from mas_hr.llm_narrator import narrate_candidate, narrate_run
 from mas_hr.recruitment_workflow import RecruitmentSystem
 from mas_hr.result_reporting import (build_candidate_report, radar_axes,
                                      rejection_reason)
@@ -314,7 +316,8 @@ def select_job(path: str) -> Optional[str]:
     lowongannya, dan diberi tahu bila ada berkas yang tidak valid.
     """
     target = Path(path).expanduser()
-    files = sorted(target.glob("*.txt")) if target.is_dir() else [target]
+    files = (sorted(f for f in target.iterdir() if f.suffix.lower() in JOB_SUFFIXES)
+             if target.is_dir() else [target])
     jobs: Dict[str, Any] = {}
     invalid: List[str] = []
     for file_path in files:
@@ -350,8 +353,10 @@ def render_sidebar() -> Dict[str, Any]:
     st.sidebar.header("Sumber data")
     job_folder = st.sidebar.text_input(
         "Folder / berkas job requirement", value=DEFAULT_JOB_FOLDER,
-        help="Folder berisi berkas .txt, atau satu berkas .txt langsung.")
-    job_status = describe_folder(job_folder, [".txt"]) if Path(job_folder).is_dir() \
+        help="Folder atau satu berkas job requirement. Format 'kunci: nilai' "
+             "dibaca langsung; job description teks bebas (.txt/.md/.pdf) "
+             "dibaca LLM DeepSeek bila DEEPSEEK_API_KEY disetel.")
+    job_status = describe_folder(job_folder, list(JOB_SUFFIXES)) if Path(job_folder).is_dir() \
         else {"ok": Path(job_folder).is_file(),
               "message": ("Berkas ditemukan" if Path(job_folder).is_file()
                           else f"Tidak ditemukan: {job_folder}"),
@@ -526,6 +531,30 @@ def humanize_outcome(text: str) -> str:
     return text
 
 
+def render_narrative(cache_key: str, button_label: str, produce) -> None:
+    """Tampilkan narasi DeepSeek yang dibuat hanya saat tombol ditekan.
+
+    Narasi disimpan di session_state supaya rerun Streamlit tidak memanggil
+    API berulang kali. `produce` mengembalikan pasangan (narasi, sumber).
+    """
+    store = st.session_state.setdefault("narratives", {})
+    if cache_key not in store:
+        if not llm_available():
+            st.caption("Narasi LLM nonaktif: setel DEEPSEEK_API_KEY untuk "
+                       "memakai DeepSeek; tombol di bawah memakai narasi template.")
+        if st.button(button_label, key=f"narrate-{cache_key}",
+                     icon=":material/auto_awesome:"):
+            with st.spinner("Menyusun narasi..."):
+                store[cache_key] = produce()
+    if cache_key in store:
+        text, source = store[cache_key]
+        with st.container(border=True):
+            st.markdown(text)
+            st.caption("Ditulis oleh LLM DeepSeek dari fakta terstruktur; tidak "
+                       "memengaruhi skor maupun keputusan."
+                       if source == "deepseek" else f"Sumber: {source}")
+
+
 def render_summary(result: Dict[str, Any]) -> None:
     """Tampilkan ringkasan lowongan dan hasil alur."""
     job, outcome, system = result["job"], result["outcome"], result["system"]
@@ -550,6 +579,17 @@ def render_summary(result: Dict[str, Any]) -> None:
 
     if result.get("source"):
         render_source_panel(result["source"])
+        llm_parsed = result["source"].get("llm_parsed") or []
+        llm_errors = result["source"].get("llm_errors") or {}
+        if llm_parsed:
+            st.caption(f"{len(llm_parsed)} CV juga diekstrak LLM DeepSeek "
+                       f"(skill, pengalaman, identitas). Metadata .meta.txt "
+                       f"tetap diutamakan.")
+        if llm_errors:
+            st.warning("Ekstraksi DeepSeek gagal, memakai parser aturan saja: "
+                       + "; ".join(f"{name} ({error})"
+                                   for name, error in llm_errors.items()),
+                       icon=":material/warning:")
     else:
         for note in result["notes"]:
             st.caption(note)
@@ -564,6 +604,8 @@ def render_summary(result: Dict[str, Any]) -> None:
     st.caption(f"Hasil: {humanize_outcome(outcome['outcome'])} · "
                f"waktu {outcome['elapsed']:.3f} detik "
                f"(tunggu manusia {system.supervisor.total_human_wait:.3f} detik)")
+    render_narrative(f"run-{job.job_id}-{outcome['elapsed']}", "Buat ringkasan naratif",
+                     lambda: narrate_run(job, result["rows"], outcome))
 
 
 def render_results_table(rows: List[dict]) -> Optional[int]:
@@ -599,7 +641,8 @@ def render_results_table(rows: List[dict]) -> Optional[int]:
     return chosen[0] if chosen else None
 
 
-def render_detail(row: dict, job, result: Optional[Dict[str, Any]] = None) -> None:
+def render_detail(row: dict, job, result: Optional[Dict[str, Any]] = None,
+                  key_prefix: str = "detail") -> None:
     """Tampilkan halaman detail satu kandidat."""
     st.markdown(f"### {row['nama']}")
     st.caption(f"{row['candidate_id']} · {row['lokasi'] or 'lokasi tidak dicatat'} · "
@@ -634,6 +677,9 @@ def render_detail(row: dict, job, result: Optional[Dict[str, Any]] = None) -> No
     if row["ditinjau_manusia"]:
         st.info("Status kepatuhan kandidat ini ditentukan oleh peninjau manusia "
                 "pada tahap Tinjauan dokumen.", icon=":material/person:")
+
+    render_narrative(f"{key_prefix}-{row['candidate_id']}-{row['tahap']}",
+                     "Buat narasi penjelasan", lambda: narrate_candidate(row, job))
 
     left, right = st.columns([3, 2])
     with left:
@@ -718,7 +764,7 @@ def render_candidate_browser(rows: List[dict], job, key_prefix: str) -> None:
     index = st.session_state.get(selection_key)
     if index is not None and index < len(rows):
         with st.expander(f"Detail: {rows[index]['nama']}", expanded=True):
-            render_detail(rows[index], job, {})
+            render_detail(rows[index], job, {}, key_prefix)
 
 
 def render_gate_timeline(run_id: str, active_checkpoint: Optional[str] = None) -> None:
@@ -838,6 +884,13 @@ def render_gate_evidence(checkpoint: str, evidence: dict,
                     f'Skill wajib ({len(skills)})</div>'
                     f'<div class="hitl-chips">{chips}</div>',
                     unsafe_allow_html=True)
+        if evidence.get("parsed_by") == "deepseek":
+            st.caption("Spesifikasi ini diekstrak LLM DeepSeek dari job description "
+                       "teks bebas. Periksa kembali sebelum menyetujui.")
+        unresolved = evidence.get("unresolved") or []
+        if unresolved:
+            st.warning("Tidak dapat dipetakan ke taksonomi skill: "
+                       + ", ".join(unresolved), icon=":material/help:")
 
     elif checkpoint == "HITL-2":
         st.markdown(kv_grid([("Kandidat", who(evidence.get("candidate_id")))]),

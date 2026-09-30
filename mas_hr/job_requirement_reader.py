@@ -1,4 +1,4 @@
-"""Pembaca job requirement dari berkas .txt (satu berkas atau satu folder).
+"""Pembaca job requirement dari berkas .txt/.md/.pdf (satu berkas atau folder).
 
 Format sengaja dibuat `kunci: nilai` agar dapat ditulis siapa pun tanpa tahu
 JSON. Contoh berkas lengkap ada di data/job_requirements/.
@@ -17,10 +17,16 @@ JSON. Contoh berkas lengkap ada di data/job_requirements/.
 Baris diawali '#' dianggap komentar. Nama skill boleh berupa skill_id
 (SKL-001) atau nama/sinonim yang dapat dinormalkan ("excel"). Skill di luar
 taksonomi DITOLAK, bukan didiamkan — itu penegakan ontologi bersama MIMA.
+
+Berkas yang BUKAN format `kunci: nilai` — job description teks bebas seperti
+iklan lowongan, termasuk PDF — diekstrak dengan LLM DeepSeek bila
+DEEPSEEK_API_KEY disetel (lihat llm_parsing.py). Hasilnya tetap melewati
+taksonomi dan JobRequirement.validate().
 """
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+from .deepseek_client import is_available as llm_available
 from .domain_models import JobRequirement
 from .settings import LEVELS
 from .skill_taxonomy import SKILLS, normalize
@@ -38,6 +44,8 @@ KEY_ALIASES: Dict[str, str] = {
     "sla_hari": "sla_days", "sla": "sla_days", "sla_days": "sla_days",
     "dokumen": "documents", "documents": "documents", "berkas": "documents",
 }
+SKILL_KEYS = ("skill", "skills", "keahlian")
+JOB_SUFFIXES = (".txt", ".md", ".pdf")
 
 
 def _parse_skill_line(value: str, line_number: int) -> dict:
@@ -105,7 +113,7 @@ def parse_job_text(text: str, fallback_job_id: str) -> JobRequirement:
             raise ValueError(f"baris {line_number}: tidak ada ':' pada '{line}'")
         key, value = line.split(":", 1)
         key, value = key.strip().lower(), value.strip()
-        if key in ("skill", "skills", "keahlian"):
+        if key in SKILL_KEYS:
             skills.append(_parse_skill_line(value, line_number))
         elif key in KEY_ALIASES:
             fields[KEY_ALIASES[key]] = value
@@ -132,8 +140,39 @@ def parse_job_text(text: str, fallback_job_id: str) -> JobRequirement:
     return job
 
 
+def parse_job_document(text: str, fallback_job_id: str) -> JobRequirement:
+    """Pilih jalur parsing: format `kunci: nilai` atau teks bebas lewat LLM.
+
+    Berkas berformat kunci-nilai selalu diurai secara ketat supaya galat
+    penulisan tetap terlihat, bukan ditebak oleh LLM.
+
+    Raises:
+        ValueError: galat format, atau teks bebas tanpa DEEPSEEK_API_KEY.
+    """
+    from .llm_parsing import looks_like_key_value, parse_job_description
+
+    if looks_like_key_value(text, set(KEY_ALIASES) | set(SKILL_KEYS)):
+        return parse_job_text(text, fallback_job_id)
+    if not llm_available():
+        raise ValueError(
+            "berkas bukan format 'kunci: nilai'. Untuk membaca job description "
+            "teks bebas dengan LLM, setel variabel lingkungan DEEPSEEK_API_KEY")
+    return parse_job_description(text, fallback_job_id)
+
+
+def _read_text(file_path: Path) -> str:
+    """Ambil teks berkas job requirement; PDF memakai ekstraktor CV."""
+    if file_path.suffix.lower() == ".pdf":
+        from .cv_reader import extract_pdf_text
+        text, _ = extract_pdf_text(file_path)
+        if not text.strip():
+            raise ValueError("tidak ada teks terbaca dari PDF (hasil pindaian?)")
+        return text
+    return file_path.read_text(encoding="utf-8")
+
+
 def read_job_file(path: str) -> JobRequirement:
-    """Baca satu berkas .txt job requirement.
+    """Baca satu berkas job requirement (.txt, .md, atau .pdf).
 
     Raises:
         FileNotFoundError: bila berkas tidak ada.
@@ -144,26 +183,29 @@ def read_job_file(path: str) -> JobRequirement:
     if not file_path.is_file():
         raise FileNotFoundError(f"berkas job requirement tidak ditemukan: {path}")
     try:
-        return parse_job_text(file_path.read_text(encoding="utf-8"), file_path.stem)
+        return parse_job_document(_read_text(file_path), file_path.stem)
     except ValueError as error:
         raise ValueError(f"{file_path.name}: {error}") from error
 
 
 def read_job_folder(path: str) -> List[JobRequirement]:
-    """Baca seluruh berkas .txt dalam sebuah folder sebagai daftar lowongan.
+    """Baca seluruh berkas job requirement dalam folder sebagai daftar lowongan.
 
     Berguna untuk skenario multi-lowongan dan untuk optimasi penugasan lintas
     lowongan, karena beberapa klien dilayani bersamaan.
 
     Raises:
-        FileNotFoundError: bila folder tidak ada atau tidak berisi .txt.
+        FileNotFoundError: bila folder tidak ada atau tidak berisi berkas
+            .txt/.md/.pdf.
     """
     folder = Path(path)
     if not folder.is_dir():
         raise FileNotFoundError(f"folder job requirement tidak ditemukan: {path}")
-    files = sorted(f for f in folder.glob("*.txt"))
+    files = sorted(f for f in folder.iterdir()
+                   if f.suffix.lower() in JOB_SUFFIXES)
     if not files:
-        raise FileNotFoundError(f"tidak ada berkas .txt di {path}")
+        raise FileNotFoundError(
+            f"tidak ada berkas {'/'.join(JOB_SUFFIXES)} di {path}")
     return [read_job_file(str(f)) for f in files]
 
 

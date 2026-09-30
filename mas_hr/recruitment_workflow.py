@@ -318,7 +318,9 @@ class RecruitmentSystem:
             return {"title": requirement["title"],
                     "headcount": requirement["headcount"],
                     "skills": [s["skill"] for s in requirement["required_skills"]],
-                    "clarification_turns": requirement["clarification_turns"]}
+                    "clarification_turns": requirement["clarification_turns"],
+                    "unresolved": requirement["unresolved_ambiguities"],
+                    "parsed_by": requirement.get("parsed_by", "format")}
 
         intake_decision = self._approve(
             "HITL-1", "Konfirmasi structured job requirement", run_intake(),

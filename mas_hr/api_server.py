@@ -18,6 +18,7 @@ from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from .job_requirement_reader import JOB_SUFFIXES
 from .recruitment_service import RecruitmentService
 from .settings import Settings
 
@@ -140,7 +141,7 @@ def inspect_folder(path: str = Query(..., description="Jalur folder yang diperik
     Membantu klien memilih folder tanpa menebak: mengembalikan daftar berkas
     yang dikenali beserta pesan bila folder tidak valid.
     """
-    suffixes = [".txt"] if kind == "job" else [".pdf", ".txt", ".md"]
+    suffixes = list(JOB_SUFFIXES) if kind == "job" else [".pdf", ".txt", ".md"]
     folder = Path(path).expanduser()
     if not folder.exists():
         raise HTTPException(404, f"folder tidak ditemukan: {folder}")
@@ -182,7 +183,8 @@ def submit_run(request: RunRequest) -> dict:
 
 @app.post("/api/runs/upload", status_code=202, tags=["run"])
 async def submit_run_with_upload(
-        job_file: UploadFile = File(..., description="Berkas job requirement .txt"),
+        job_file: UploadFile = File(..., description="Job requirement .txt (kunci: nilai) "
+                                        "atau job description teks bebas .txt/.md/.pdf"),
         cv_files: List[UploadFile] = File(default=[], description="Berkas CV"),
         meta_files: List[UploadFile] = File(default=[],
                                             description="Berkas *.meta.txt"),
@@ -272,6 +274,29 @@ def get_candidate_detail(run_id: str, candidate_id: str) -> dict:
     if detail is None:
         raise HTTPException(404, f"kandidat tidak ditemukan: {candidate_id}")
     return detail
+
+
+@app.get("/api/runs/{run_id}/candidates/{candidate_id}/narrative", tags=["hasil"])
+def get_candidate_narrative(run_id: str, candidate_id: str) -> dict:
+    """Narasi DeepSeek yang menjelaskan hasil satu kandidat.
+
+    `sumber` bernilai "deepseek" atau "template (...)" bila LLM tidak tersedia.
+    """
+    require_run(run_id)
+    narrative = require_service().candidate_narrative(run_id, candidate_id)
+    if narrative is None:
+        raise HTTPException(404, f"kandidat tidak ditemukan: {candidate_id}")
+    return narrative
+
+
+@app.get("/api/runs/{run_id}/narrative", tags=["hasil"])
+def get_run_narrative(run_id: str) -> dict:
+    """Ringkasan naratif DeepSeek untuk seluruh hasil satu run."""
+    require_run(run_id)
+    narrative = require_service().run_narrative(run_id)
+    if narrative is None:
+        raise HTTPException(409, "run belum memiliki hasil")
+    return narrative
 
 
 @app.get("/api/runs/{run_id}/messages", tags=["hasil"])

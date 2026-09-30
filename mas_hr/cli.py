@@ -77,6 +77,11 @@ def prepare_world(args) -> tuple:
         if report.get("skipped_duplicates"):
             notes.append(f"           {report['skipped_duplicates']} dilewati "
                          f"(orang yang sama sudah terbaca dari format lain)")
+        if report.get("llm_parsed"):
+            notes.append(f"LLM      : {len(report['llm_parsed'])} CV diekstrak DeepSeek")
+        if report.get("llm_errors"):
+            notes.append(f"PERINGATAN: ekstraksi DeepSeek gagal untuk "
+                         f"{sorted(report['llm_errors'])}; memakai parser aturan.")
         if report["empty_files"]:
             notes.append(f"PERINGATAN: tidak ada teks terbaca dari "
                          f"{report['empty_files']} — kemungkinan PDF hasil "

@@ -24,6 +24,7 @@ import uuid
 from .cv_reader import read_cv_folder
 from .human_approval import QueuedApprover, SimulatedApprover
 from .job_requirement_reader import load_jobs
+from .llm_narrator import narrate_candidate, narrate_run
 from .recruitment_service_models import RunSummary
 from .result_reporting import build_candidate_report, radar_axes, rejection_reason
 from .settings import Settings
@@ -137,6 +138,13 @@ class RecruitmentService:
             if report.get("skipped_duplicates"):
                 notes.append(f"Dilewati karena orangnya sudah terbaca dari format "
                              f"lain: {', '.join(report['skipped_duplicates'])}.")
+            if report.get("llm_parsed"):
+                notes.append(f"{len(report['llm_parsed'])} CV juga diekstrak "
+                             f"LLM DeepSeek (skill, pengalaman, identitas).")
+            if report.get("llm_errors"):
+                notes.append(f"Ekstraksi DeepSeek gagal untuk "
+                             f"{', '.join(report['llm_errors'])}; memakai "
+                             f"parser aturan saja.")
             if report["empty_files"]:
                 notes.append(f"Tidak ada teks terbaca dari "
                              f"{', '.join(report['empty_files'])} — kemungkinan "
@@ -319,6 +327,25 @@ class RecruitmentService:
             return None
         return {**row, "alasan_gugur": rejection_reason(row),
                 "radar": radar_axes(row, record.job, canonical_name)}
+
+    def candidate_narrative(self, run_id: str, candidate_id: str) -> Optional[dict]:
+        """Narasi LLM (DeepSeek) yang menjelaskan hasil satu kandidat."""
+        record = self.get(run_id)
+        if record is None:
+            return None
+        row = next((r for r in record.rows if r["candidate_id"] == candidate_id), None)
+        if row is None:
+            return None
+        text, source = narrate_candidate(row, record.job)
+        return {"candidate_id": candidate_id, "narasi": text, "sumber": source}
+
+    def run_narrative(self, run_id: str) -> Optional[dict]:
+        """Ringkasan naratif LLM (DeepSeek) untuk seluruh hasil satu run."""
+        record = self.get(run_id)
+        if record is None or record.job is None:
+            return None
+        text, source = narrate_run(record.job, record.rows, record.outcome)
+        return {"run_id": run_id, "narasi": text, "sumber": source}
 
     def messages(self, run_id: str, limit: int = 200) -> List[dict]:
         """Jejak pesan antar-agen untuk satu run (message trace)."""
