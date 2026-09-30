@@ -182,10 +182,11 @@ python3 -m mas_hr.cli injection            # uji ketahanan prompt injection
 python3 -m mas_hr.cli assign --job data/job_requirements
 python3 -m mas_hr.cli gamma                # kurva trade-off otonomi (H6)
 python3 -m mas_hr.cli skills               # daftar skill kanonik
+python3 -m mas_hr.cli llm-check            # cek LLM DeepSeek (lihat bagian LLM)
 python3 -m mas_hr.cli ui                   # antarmuka Streamlit
 python3 -m mas_hr.cli serve                # server FastAPI saja
 python3 -m mas_hr.cli start                # API + UI sekaligus
-python3 -m pytest tests/ -q                # 30 uji invarian
+python3 -m pytest tests/ -q                # 42 uji invarian
 ```
 
 ### Memakai job requirement sendiri (.txt)
@@ -268,42 +269,208 @@ sekali — CLI melaporkannya agar tidak disalahartikan sebagai kesalahan sistem.
 
 ## LLM DeepSeek (opsional)
 
-Tanpa konfigurasi apa pun sistem tetap berjalan seperti biasa, deterministik,
-dan tanpa jaringan. Isi kunci API untuk mengaktifkan tiga fungsi LLM.
+LLM DeepSeek dipakai untuk tiga hal: **parsing job description**, **parsing
+CV**, dan **narasi** penjelasan hasil. Ketiganya opsional. Tanpa API key,
+sistem berjalan seperti semula: deterministik, tanpa jaringan, dan tanpa
+paket tambahan.
 
-**Cara yang disarankan — berkas `.env`** (sudah di `.gitignore`, tidak ikut
-ter-commit):
+Prinsip rancangannya: **LLM mengekstrak dan menjelaskan, tidak memutuskan.**
+Skor, status kepatuhan, peringkat, dan gerbang persetujuan manusia tetap
+dihitung oleh kode yang sama seperti sebelumnya.
+
+### Mengaktifkan
 
 ```bash
 cp .env.example .env                  # PowerShell: Copy-Item .env.example .env
-# lalu buka .env dan isi:  DEEPSEEK_API_KEY=sk-...
+# buka .env lalu isi:  DEEPSEEK_API_KEY=sk-...
+python -m mas_hr.cli llm-check        # pastikan semuanya [OK]
 ```
 
-`.env` dimuat otomatis (`env_loader.py`) dari folder kerja atau akar proyek
-saat aplikasi dijalankan; setelah mengubahnya, jalankan ulang aplikasi.
-Variabel lingkungan yang disetel di terminal selalu menang atas isi `.env`:
+`.env` sudah ada di `.gitignore`, jadi kunci tidak ikut ter-commit. Jangan
+menulis kunci di `.env.example`: berkas itu ikut ter-commit dan tidak dibaca
+aplikasi. Setelah `.env` diubah, jalankan ulang aplikasi.
 
-```bash
-export DEEPSEEK_API_KEY=sk-...        # PowerShell: $env:DEEPSEEK_API_KEY="sk-..."
+| Variabel | Wajib | Default | Keterangan |
+|---|---|---|---|
+| `DEEPSEEK_API_KEY` | ya | — | Kunci dari platform.deepseek.com → API Keys |
+| `DEEPSEEK_MODEL` | tidak | `deepseek-chat` | `deepseek-chat` cepat (±1 dtk per CV). Model reasoning seperti `deepseek-v4-pro` jauh lebih lambat (±15 dtk per CV). |
+| `DEEPSEEK_BASE_URL` | tidak | `https://api.deepseek.com` | Ganti bila memakai proxy atau endpoint lain yang kompatibel |
+
+Urutan pencarian: variabel yang disetel di terminal (misalnya
+`$env:DEEPSEEK_API_KEY="sk-..."` atau `setx`) → `.env` di folder kerja →
+`.env` di akar proyek. Yang ditemukan lebih dulu menang.
+
+### Memeriksa apakah LLM bekerja
+
+```
+python -m mas_hr.cli llm-check
 ```
 
-| Fungsi | Di mana | Batas yang dipaksakan kode |
+| Langkah | Yang diuji | Bila GAGAL, periksa |
 |---|---|---|
-| **Parsing job description** teks bebas (.txt/.md/.pdf) | `job_requirement_reader.py` → `llm_parsing.py` | Berkas `kunci: nilai` tetap memakai parser ketat. Skill wajib ada di taksonomi; skill asing menjadi ambiguitas yang tampil di gerbang Konfirmasi lowongan. Bobot dinormalkan dan `validate()` tetap berlaku. |
-| **Parsing CV** (nama, lokasi, pengalaman, skill + level) | `cv_reader.py` → `llm_parsing.py` → Screening Agent | CV disanitasi (`sanitize_cv`) sebelum dikirim. Skill wajib ada di taksonomi. `.meta.txt` selalu menang. Dokumen kepatuhan **tidak pernah** diambil dari LLM. Skor tetap dihitung model screening. |
-| **Narasi** penjelasan hasil kandidat dan ringkasan run | `llm_narrator.py`, tombol di UI, `GET .../narrative` | Hanya fakta terstruktur yang dikirim, tanpa teks CV. Narasi tidak memengaruhi skor maupun keputusan. |
+| Berkas .env / API key | `.env` ditemukan dan kunci terbaca (ditampilkan tersamar) | Nama berkas harus `.env`, bukan `.env.example` |
+| Koneksi & narasi | Satu pesan pendek lewat `chat()`, jalur yang sama dengan narasi | Kunci salah (HTTP 401), jaringan, atau nama model |
+| Parsing CV | Satu CV contoh lewat `parse_cv_text()` (mode JSON) | Format balasan model, atau batas token |
+| Parsing job description | Satu lowongan contoh lewat `parse_job_description()` | Skill tidak terpetakan ke taksonomi |
 
-**Cek apakah LLM bekerja:** `python -m mas_hr.cli llm-check` menguji koneksi,
-parsing CV, dan parsing job description secara langsung, lalu mencetak
-`[OK]`/`[GAGAL]` beserta alasannya per langkah.
+Perintah ini keluar dengan kode 1 bila ada langkah yang gagal, sehingga bisa
+dipakai di skrip.
 
-Bila panggilan gagal, parsing CV jatuh ke parser aturan dan narasi jatuh ke
-template; sumbernya selalu dilaporkan. Kandidat **sintetis** (eksperimen
-S1–S7) tidak pernah melewati LLM, sehingga hasil eksperimen tetap dapat
-direproduksi.
+### Tiga fungsi LLM
 
-**Data pribadi:** parsing CV mengirim isi CV ke layanan DeepSeek. Untuk CV
-orang sungguhan, pastikan ada persetujuan pemiliknya.
+| Fungsi | Kapan aktif | Batas yang dipaksakan kode |
+|---|---|---|
+| **Parsing job description** | Berkas lowongan (.txt/.md/.pdf) yang **bukan** format `kunci: nilai` | Berkas `kunci: nilai` tetap memakai parser ketat. Skill wajib ada di taksonomi; skill asing menjadi ambiguitas di gerbang Konfirmasi lowongan. Bobot dinormalkan ke 1.0 dan `validate()` tetap berlaku. |
+| **Parsing CV** | Setiap CV dari folder, bila kunci tersedia | CV disanitasi (`sanitize_cv`) sebelum dikirim. Skill wajib ada di taksonomi, level wajib `basic`/`intermediate`/`advanced`, pengalaman dibatasi 0–50 tahun. `.meta.txt` selalu menang. Dokumen kepatuhan **tidak pernah** diambil dari LLM. |
+| **Narasi** | Hanya saat tombol di UI ditekan atau endpoint `/narrative` dipanggil | Hanya fakta terstruktur yang dikirim, tanpa teks CV. Narasi tidak mengalir balik ke skor maupun keputusan. |
+
+### Alur data
+
+```
+berkas lowongan ─► job_requirement_reader.parse_job_document
+                     ├─ format "kunci: nilai" ─► parse_job_text (parser ketat, tanpa LLM)
+                     └─ teks bebas ───────────► llm_parsing.parse_job_description ─► DeepSeek
+                                                  └─ skill asing ─► job.unresolved_skills
+                                                       └─► IntakeAgent ─► bukti gerbang HITL-1
+
+folder CV ─► cv_reader.read_cv_folder
+               ├─ ekstraksi teks (pypdf / pdftotext / bawaan)
+               ├─ llm_parsing.parse_cv_text  (4 CV paralel, setelah sanitize_cv) ─► DeepSeek
+               └─ Candidate(nama/lokasi/pengalaman: .meta.txt > LLM > default,
+                            llm_skills = skill tervalidasi)
+                    └─► ScreeningAgent: merge_skills(parser aturan, llm_skills)
+                         └─► model screening menghitung skor (tanpa LLM)
+
+hasil run ─► llm_narrator.narrate_candidate / narrate_run
+               └─ candidate_facts(): hanya angka, status, temuan ─► DeepSeek ─► narasi
+```
+
+### Referensi modul
+
+**`mas_hr/deepseek_client.py`**: klien HTTP DeepSeek berbasis `urllib`.
+Endpoint DeepSeek kompatibel dengan format chat completions OpenAI.
+
+| Nama | Keterangan |
+|---|---|
+| `is_available()` | `True` bila `DEEPSEEK_API_KEY` terisi |
+| `model_name()` | Model aktif, dari `DEEPSEEK_MODEL` atau default |
+| `chat(system, user, max_tokens=4000, json_mode=False, temperature=0.3)` | Satu panggilan; mengembalikan teks balasan |
+| `chat_json(system, user, max_tokens=8000)` | Mode JSON, `temperature=0`, hasil di-cache per isi prompt supaya rerun Streamlit tidak memanggil API ulang |
+| `DeepSeekError` | Galat kunci, HTTP, jaringan, balasan kosong, atau JSON rusak |
+| `ENV_FILES` | Daftar berkas `.env` yang berhasil dimuat |
+
+Batas token dibuat longgar (4.000 untuk teks, 8.000 untuk JSON) karena model
+reasoning menghabiskan token untuk "berpikir" sebelum menjawab. Bila batas
+habis, galatnya menyebut penyebab ini.
+
+**`mas_hr/env_loader.py`**: pemuat `.env` tanpa paket tambahan.
+
+| Nama | Keterangan |
+|---|---|
+| `load_env(paths=None)` | Muat `.env` ke `os.environ` tanpa menimpa variabel yang sudah ada |
+| `parse_env_text(text)` | Urai `KUNCI=nilai`; mendukung komentar `#`, awalan `export`, dan tanda kutip |
+
+**`mas_hr/llm_parsing.py`**: ekstraksi dengan validasi.
+
+| Nama | Keterangan |
+|---|---|
+| `parse_job_description(text, fallback_job_id)` | Teks bebas → `JobRequirement` dengan `parsed_by="deepseek"`. Melempar `ValueError` bila gagal atau tidak ada skill yang terpetakan. |
+| `parse_cv_text(cv_text)` | Teks CV → `{name, location, experience_years, skills}`. Melempar `DeepSeekError` bila gagal. |
+| `looks_like_key_value(text, keys)` | `True` bila ≥60% baris berformat `kunci: nilai`; menentukan jalur parser ketat atau LLM |
+
+Setiap `skill_id` dari LLM diperiksa ulang: bila tidak ada di taksonomi,
+nama skill dinormalkan dengan `normalize()`, dan bila tetap tidak dikenal,
+skill itu dibuang (CV) atau dicatat sebagai ambiguitas (lowongan). Teks
+masukan dipotong di 30.000 karakter.
+
+**`mas_hr/llm_narrator.py`**: narasi hasil.
+
+| Nama | Keterangan |
+|---|---|
+| `candidate_facts(row, job)` | Menyaring baris hasil kandidat menjadi fakta yang aman dikirim; `cv_text` sengaja dibuang |
+| `narrate_candidate(row, job)` | Mengembalikan `(narasi, sumber)` untuk satu kandidat |
+| `narrate_run(job, rows, outcome)` | Mengembalikan `(narasi, sumber)` untuk seluruh run |
+
+`sumber` bernilai `"deepseek"`, atau `"template (alasan)"` bila LLM tidak
+tersedia atau gagal.
+
+**Perubahan pada modul yang sudah ada**
+
+| Berkas | Perubahan |
+|---|---|
+| `domain_models.py` | `JobRequirement.parsed_by`, `JobRequirement.unresolved_skills`, `Candidate.llm_skills` |
+| `job_requirement_reader.py` | `parse_job_document()` memilih jalur; mendukung .md dan .pdf (`JOB_SUFFIXES`) |
+| `cv_reader.py` | `read_cv_folder(..., use_llm=None)`; `None` berarti otomatis aktif bila kunci ada. Laporan menambah `llm_parsed` dan `llm_errors`. |
+| `agents/screening_agent.py` | `merge_skills()` menggabungkan skill parser aturan dan LLM; level tertinggi yang dipakai |
+| `agents/intake_agent.py` | `unresolved_skills` masuk `unresolved_ambiguities`; payload membawa `parsed_by` |
+| `recruitment_workflow.py` | Bukti gerbang HITL-1 memuat `unresolved` dan `parsed_by` |
+| `recruitment_service.py` | `candidate_narrative()` dan `run_narrative()` |
+| `cli.py` | Perintah `llm-check` |
+
+### Endpoint API
+
+| Metode | Path | Hasil |
+|---|---|---|
+| GET | `/api/runs/{run_id}/narrative` | `{run_id, narasi, sumber}`: ringkasan seluruh run |
+| GET | `/api/runs/{run_id}/candidates/{candidate_id}/narrative` | `{candidate_id, narasi, sumber}`: penjelasan satu kandidat |
+
+`GET /api/folders?kind=job` dan `POST /api/runs/upload` juga menerima job
+description .md dan .pdf.
+
+### Tampilan di antarmuka Streamlit
+
+- **Ringkasan hasil**: tombol *Buat ringkasan naratif*, dan keterangan
+  *"N CV juga diekstrak LLM DeepSeek"* atau peringatan bila ekstraksi gagal.
+- **Detail kandidat**: tombol *Buat narasi penjelasan*. Narasi dari LLM diberi
+  label *"Ditulis oleh LLM DeepSeek…"*, sedangkan narasi cadangan diberi label
+  *"Sumber: template (…)"*.
+- **Gerbang Konfirmasi lowongan**: keterangan bila spesifikasi berasal dari
+  LLM, dan daftar skill yang tidak terpetakan ke taksonomi.
+
+Narasi baru dibuat saat tombol ditekan, lalu disimpan di sesi, supaya rerun
+Streamlit tidak memanggil API berulang kali.
+
+### Perilaku saat LLM tidak tersedia atau gagal
+
+| Situasi | Parsing job description | Parsing CV | Narasi |
+|---|---|---|---|
+| Tanpa kunci | Format `kunci: nilai` jalan; teks bebas ditolak dengan pesan yang menyebut `.env` | Parser aturan saja | Template |
+| Jaringan atau API gagal | `ValueError` dengan alasannya | Parser aturan; nama berkas masuk `llm_errors` | Template, dengan alasan di `sumber` |
+
+Kandidat **sintetis** (eksperimen S1–S7) tidak pernah melewati LLM, sehingga
+hasil eksperimen tetap dapat direproduksi.
+
+### Keamanan dan data pribadi
+
+- **Prompt injection**: CV adalah teks tak terpercaya. Baris yang menyerupai
+  instruksi dinetralkan sebelum dikirim, prompt menegaskan bahwa isi `<cv>`
+  adalah data, dan keluaran dibatasi ke taksonomi dan level yang sah. Deteksi
+  injeksi di Screening Agent tetap berjalan pada teks mentah.
+- **Tidak mengarang bukti**: dokumen kepatuhan hanya berasal dari
+  `.meta.txt`, tidak pernah dari LLM.
+- **Data pribadi**: parsing CV mengirim isi CV ke layanan DeepSeek. Untuk CV
+  orang sungguhan, pastikan ada persetujuan pemiliknya. Narasi tidak mengirim
+  teks CV.
+
+### Pengujian
+
+Uji LLM tidak pernah memanggil DeepSeek sungguhan. HTTP diganti balasan
+palsu, dan fixture `_tanpa_deepseek` mengosongkan seluruh variabel
+`DEEPSEEK_*`, termasuk yang dimuat dari `.env` lokal.
+
+| Uji | Klaim |
+|---|---|
+| `test_narasi_tanpa_kunci_memakai_template` | Tanpa kunci, narasi jatuh ke template |
+| `test_narasi_tidak_mengirim_teks_cv_ke_llm` | Teks CV tidak ikut terkirim |
+| `test_narasi_gagal_jatuh_ke_template` | Gangguan jaringan tidak menggagalkan halaman |
+| `test_job_description_bebas_tanpa_kunci_ditolak_jelas` | Pesan galat menunjuk solusinya |
+| `test_job_description_bebas_diparsing_llm_dan_divalidasi` | Taksonomi, level, dan bobot dipaksakan; skill asing tercatat |
+| `test_format_kunci_nilai_tidak_diserahkan_ke_llm` | Galat penulisan berkas terstruktur tetap terlihat |
+| `test_ambiguitas_parsing_llm_sampai_ke_intake` | Skill asing sampai ke bukti HITL-1 |
+| `test_cv_diparsing_llm_tersanitasi_dan_meta_diutamakan` | Sanitasi, prioritas `.meta.txt`, dokumen tidak dikarang |
+| `test_cv_llm_gagal_tetap_terbaca_dengan_parser_aturan` | Kegagalan LLM tidak menggagalkan pembacaan folder |
+| `test_env_dimuat_tanpa_menimpa_variabel_terminal` | `.env` terbaca; variabel terminal menang |
+| `test_env_tidak_ada_tidak_galat` | Tanpa `.env` tetap berjalan |
 
 ---
 
